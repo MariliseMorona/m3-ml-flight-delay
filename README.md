@@ -28,6 +28,9 @@ Projeto em Python que cobre um **pipeline completo** de ciência de dados sobre 
 | **Supervisionado — classificação** | Prever se o voo atrasa na chegada (> 15 min): **regressão logística** vs **Random Forest** (ROC-AUC, F1, acurácia, matriz de confusão, ROC). |
 | **Supervisionado — regressão** | Prever minutos de `ARRIVAL_DELAY`: **Ridge** vs **Random Forest** (MAE, RMSE, R²). |
 | **Não supervisionado** | **PCA** 2D em variáveis numéricas pré-voo; **K-Means** em perfis agregados por companhia aérea. |
+| **Geo e Temporal** | Mapa interativo (`folium`) de aeroportos críticos e *Heatmap* de horários/sazonalidade. |
+| **Dashboard Visual** | Painel interativo (`ipywidgets`/`plotly`) para explorar cenários e painéis de liderança em tempo real. |
+| **IA Avançada** | **Isolation Forest** (anomalias multidimensionais) e **LabelSpreading** (aprendizado semi-supervisionado limitando labels a 10%). |
 | **Síntese** | Conclusões, limitações e melhorias sugeridas (no notebook). |
 
 **Nota importante:** os preditores usados são apenas informação **disponível antes da partida** (sem `DEPARTURE_DELAY`, tempos reais de voo, etc.), para evitar *data leakage*.
@@ -258,6 +261,8 @@ Por defeito, o smoke usa `FLIGHTS_DATA_DIR` se existir; caso contrário usa `dat
 - **Regressão:** alvo = `ARRIVAL_DELAY` em minutos (valores negativos = chegada antecipada).
 - **Partição:** 80% treino / 20% teste, estratificada na classe.
 - **Não supervisionado:** PCA para visualização; K-Means (k=4) em agregados por companhia.
+- **Detecção de Anomalias:** Isolation Forest limitando a contaminação teórica a 5%.
+- **Semi-supervisionado:** LabelSpreading propagando aprendizado de apenas 10% da base rotulada para os restantes 90%.
 
 Documentação adicional das colunas: **`dicionario_dados_flights.pdf`**.
 
