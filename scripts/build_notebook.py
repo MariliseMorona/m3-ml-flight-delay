@@ -525,9 +525,9 @@ display(
     #  SEÇÃO 5 — Mapas geográficos de rotas e atrasos                   #
     # ------------------------------------------------------------------ #
     md(
-        """## 5. Mapas geográficos de rotas e atrasos
+        """## 4. Mapas geográficos de rotas e atrasos
 
-> **Pré-requisito:** esta seção usa `model_df`, `airlines` e `airports_geo`. Se você está rodando as seções 5–8 isoladamente (sem ter executado as seções anteriores), execute a célula abaixo para recriar as variáveis necessárias. Caso já tenha rodado o notebook do início, pule esta célula."""
+> **Pré-requisito:** esta seção usa `model_df`, `airlines` e `airports_geo`. Se você está rodando as seções 4–7 isoladamente (sem ter executado as seções anteriores), execute a célula abaixo para recriar as variáveis necessárias. Caso já tenha rodado o notebook do início, pule esta célula."""
     )
 
     code(
@@ -551,7 +551,7 @@ else:
     print("Variáveis já definidas — seguindo em frente.")"""
     )
 
-    md("### 5.1 Preparação dos dados geográficos\n\nMerge das estatísticas de atraso por aeroporto com as coordenadas lat/lon de `airports.csv`.")
+    md("### 4.1 Preparação dos dados geográficos\n\nMerge das estatísticas de atraso por aeroporto com as coordenadas lat/lon de `airports.csv`.")
 
     code(
         r"""airports_geo = load_airports_geo(AIRPORTS_CSV)
@@ -561,7 +561,7 @@ print(f"{len(apt_stats)} aeroportos com coordenadas | {len(route_stats)} rotas p
 apt_stats.sort_values("mean_delay", ascending=False).head()"""
     )
 
-    md("### 5.2 Mapa interativo folium — atraso médio por aeroporto de origem")
+    md("### 4.2 Mapa interativo folium — atraso médio por aeroporto de origem")
 
     code(
         r"""import colorsys
@@ -611,7 +611,7 @@ print("Mapa salvo em:", map_path)
 m  # renderiza inline no Jupyter""" 
     )
 
-    md("### 5.3 Top-15 aeroportos por atraso médio")
+    md("### 4.3 Top-15 aeroportos por atraso médio")
 
     code(
         r"""top15 = apt_stats.nlargest(15, "mean_delay")
@@ -638,9 +638,9 @@ plt.show()"""
     #  SEÇÃO 6 — Padrões sazonais e horários críticos                    #
     # ------------------------------------------------------------------ #
     md(
-        """## 6. Padrões sazonais e horários críticos
+        """## 5. Padrões sazonais e horários críticos
 
-### 6.1 Heatmap hora do dia × dia da semana
+### 5.1 Heatmap hora do dia × dia da semana
 
 A hora de partida é obtida de `DEP_MIN` (minutos desde meia-noite) arredondada para o bin de 1 h."""
     )
@@ -673,7 +673,7 @@ plt.tight_layout()
 plt.show()"""
     )
 
-    md("### 6.2 Horários mais críticos")
+    md("### 5.2 Horários mais críticos")
 
     code(
         r"""hora_stats = (
@@ -695,7 +695,7 @@ plt.tight_layout()
 plt.show()"""
     )
 
-    md("### 6.3 Evolução mensal por top-5 aeroportos de origem")
+    md("### 5.3 Evolução mensal por top-5 aeroportos de origem")
 
     code(
         r"""top5_airports = (
@@ -726,7 +726,7 @@ plt.show()"""
     #  SEÇÃO 7 — Dashboard interativo (ipywidgets)                        #
     # ------------------------------------------------------------------ #
     md(
-        """## 7. Dashboard interativo
+        """## 6. Dashboard interativo
 
 Filtros dinâmicos por companhia aérea, mês e aeroporto de origem. Use os controles abaixo e o gráfico atualiza automaticamente.
 
@@ -808,9 +808,9 @@ ipy_display(widgets.VBox([widgets.HBox([dd_airline, dd_month, dd_origin]), out])
     #  SEÇÃO 8 — Detecção de anomalias e semi-supervisionado              #
     # ------------------------------------------------------------------ #
     md(
-        """## 8. Detecção de anomalias e aprendizado semi-supervisionado
+        """## 7. Detecção de anomalias e aprendizado semi-supervisionado
 
-### 8.1 Isolation Forest
+### 7.1 Isolation Forest
 
 Detecção de voos anômalos (outliers multidimensionais) usando apenas features pré-voo sem labels. A contaminação esperada é fixada em 5%."""
     )
@@ -868,7 +868,7 @@ print("Atraso médio dos voos normais :",
     )
 
     md(
-        """### 8.2 Aprendizado semi-supervisionado — LabelSpreading
+        """### 7.2 Aprendizado semi-supervisionado — LabelSpreading
 
 Simulação de cenário prático: apenas **10% dos voos** têm o label real (`DELAYED_ARRIVAL`); os restantes 90% são tratados como não rotulados. O `LabelSpreading` propaga os rótulos usando a estrutura de vizinhança no espaço de features."""
     )
@@ -923,7 +923,7 @@ plt.show()"""
     )
 
     md(
-        """## 9. Conclusões, limitações e próximos passos
+        """## 8. Conclusões, limitações e próximos passos
 
 ### Principais conclusões
 - A taxa de atraso varia com **mês**, **dia da semana** e **companhia**, visível no EDA e nos clusters.
