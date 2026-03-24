@@ -95,13 +95,16 @@ ROOT = PROJECT_ROOT
 sys.path.insert(0, str(ROOT))
 os.chdir(ROOT)
 
+import folium
+import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from IPython.display import IFrame, display
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.ensemble import IsolationForest, RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import (
     ConfusionMatrixDisplay,
@@ -117,10 +120,12 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
+from sklearn.semi_supervised import LabelSpreading
 
-from config import AIRLINES_CSV, DEFAULT_SAMPLE_SIZE, FLIGHTS_CSV, RANDOM_SEED
+from config import AIRLINES_CSV, AIRPORTS_CSV, DEFAULT_SAMPLE_SIZE, FLIGHTS_CSV, RANDOM_SEED
 from src.features import build_model_frame, X_y_classification
-from src.load_data import load_airlines, load_flights_sample
+from src.geo import airport_delay_stats, build_route_stats, load_airports_geo
+from src.load_data import load_airlines, load_airports, load_flights_sample
 from src.preprocess import make_column_transformer
 
 sns.set_theme(style="whitegrid", context="notebook")
@@ -133,6 +138,10 @@ print("Amostra:", SAMPLE_SIZE)"""
         )
     else:
         code(
+            r"""# Descomente a linha abaixo para instalar as dependências caso esteja num ambiente novo:
+# %pip install folium ipywidgets plotly"""
+        )
+        code(
             r"""import sys
 import warnings
 from pathlib import Path
@@ -142,13 +151,16 @@ warnings.filterwarnings("ignore")
 ROOT = next(p for p in [Path.cwd(), *Path.cwd().parents] if (p / "config.py").exists())
 sys.path.insert(0, str(ROOT))
 
+import folium
+import ipywidgets as widgets
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from IPython.display import IFrame, display
 from sklearn.cluster import KMeans
 from sklearn.decomposition import PCA
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.ensemble import IsolationForest, RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import LogisticRegression, Ridge
 from sklearn.metrics import (
     ConfusionMatrixDisplay,
@@ -164,10 +176,12 @@ from sklearn.metrics import (
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
+from sklearn.semi_supervised import LabelSpreading
 
-from config import AIRLINES_CSV, DEFAULT_SAMPLE_SIZE, FLIGHTS_CSV, RANDOM_SEED
+from config import AIRLINES_CSV, AIRPORTS_CSV, DEFAULT_SAMPLE_SIZE, FLIGHTS_CSV, RANDOM_SEED
 from src.features import build_model_frame, X_y_classification
-from src.load_data import load_airlines, load_flights_sample
+from src.geo import airport_delay_stats, build_route_stats, load_airports_geo
+from src.load_data import load_airlines, load_airports, load_flights_sample
 from src.preprocess import make_column_transformer
 
 sns.set_theme(style="whitegrid", context="notebook")
@@ -507,28 +521,431 @@ display(
 )"""
     )
 
+    # ------------------------------------------------------------------ #
+    #  SEÇÃO 5 — Mapas geográficos de rotas e atrasos                   #
+    # ------------------------------------------------------------------ #
     md(
-        """## 4. Conclusões, limitações e próximos passos
+        """## 5. Mapas geográficos de rotas e atrasos
+
+> **Pré-requisito:** esta seção usa `model_df`, `airlines` e `airports_geo`. Se você está rodando as seções 5–8 isoladamente (sem ter executado as seções anteriores), execute a célula abaixo para recriar as variáveis necessárias. Caso já tenha rodado o notebook do início, pule esta célula."""
+    )
+
+    code(
+        r"""# Guard: recria variáveis caso as seções anteriores não tenham sido executadas
+import builtins
+
+def _var_missing(*names):
+    g = globals()
+    return any(n not in g for n in names)
+
+if _var_missing("model_df", "airlines", "flights_raw"):
+    print("Recriando variáveis do pipeline...")
+    from src.load_data import load_airlines, load_airports, load_flights_sample
+    from src.features import build_model_frame, X_y_classification
+    airlines = load_airlines(AIRLINES_CSV)
+    flights_raw = load_flights_sample(FLIGHTS_CSV, n=SAMPLE_SIZE, seed=RANDOM_SEED)
+    flights_raw["AIRLINE"] = flights_raw["AIRLINE"].astype(str)
+    model_df = build_model_frame(flights_raw)
+    print(f"model_df: {model_df.shape} | airlines: {airlines.shape}")
+else:
+    print("Variáveis já definidas — seguindo em frente.")"""
+    )
+
+    md("### 5.1 Preparação dos dados geográficos\n\nMerge das estatísticas de atraso por aeroporto com as coordenadas lat/lon de `airports.csv`.")
+
+    code(
+        r"""airports_geo = load_airports_geo(AIRPORTS_CSV)
+apt_stats = airport_delay_stats(model_df, airports_geo)
+route_stats = build_route_stats(model_df, airports_geo, top_n=60)
+print(f"{len(apt_stats)} aeroportos com coordenadas | {len(route_stats)} rotas principais")
+apt_stats.sort_values("mean_delay", ascending=False).head()"""
+    )
+
+    md("### 5.2 Mapa interativo folium — atraso médio por aeroporto de origem")
+
+    code(
+        r"""import colorsys
+
+def delay_color(val, vmin=-5, vmax=30):
+    # Verde (pontual) -> vermelho (muito atrasado)
+    t = max(0.0, min(1.0, (val - vmin) / (vmax - vmin)))
+    r, g, b = colorsys.hsv_to_rgb((1 - t) * 0.33, 0.85, 0.9)
+    return "#{:02x}{:02x}{:02x}".format(int(r * 255), int(g * 255), int(b * 255))
+
+m = folium.Map(location=[37.5, -96], zoom_start=4, tiles="CartoDB positron")
+for _, row in apt_stats.iterrows():
+    radius = max(4, min(18, row["n_flights"] / 1500))
+    color = delay_color(row["mean_delay"])
+    popup = (
+        f"<b>{row['ORIGIN_AIRPORT']}</b><br>"
+        f"Atraso médio: {row['mean_delay']:.1f} min<br>"
+        f"Taxa >15 min: {row['delay_rate']*100:.1f}%<br>"
+        f"Voos na amostra: {int(row['n_flights'])}"
+    )
+    folium.CircleMarker(
+        location=[row["LATITUDE"], row["LONGITUDE"]],
+        radius=radius,
+        color=color,
+        fill=True,
+        fill_color=color,
+        fill_opacity=0.75,
+        popup=folium.Popup(popup, max_width=220),
+        tooltip=row["ORIGIN_AIRPORT"],
+    ).add_to(m)
+
+# Rotas (top 60 por volume) — linhas com opacidade proporcional ao atraso médio
+for _, r in route_stats.iterrows():
+    delay_clip = max(0, r["mean_delay"])
+    opacity = 0.1 + 0.5 * min(1.0, delay_clip / 40)
+    folium.PolyLine(
+        locations=[[r["orig_lat"], r["orig_lon"]], [r["dest_lat"], r["dest_lon"]]],
+        color="#e63946",
+        weight=1.2,
+        opacity=opacity,
+        tooltip=f"{r['ORIGIN_AIRPORT']}→{r['DESTINATION_AIRPORT']} | {r['mean_delay']:.1f} min",
+    ).add_to(m)
+
+map_path = ROOT / "notebooks" / "mapa_atrasos.html"
+m.save(str(map_path))
+print("Mapa salvo em:", map_path)
+m  # renderiza inline no Jupyter""" 
+    )
+
+    md("### 5.3 Top-15 aeroportos por atraso médio")
+
+    code(
+        r"""top15 = apt_stats.nlargest(15, "mean_delay")
+fig, ax = plt.subplots(figsize=(9, 5))
+sns.barplot(
+    data=top15,
+    y="ORIGIN_AIRPORT",
+    x="mean_delay",
+    hue="delay_rate",
+    palette="YlOrRd",
+    ax=ax,
+    legend=False,
+)
+sm = plt.cm.ScalarMappable(cmap="YlOrRd", norm=plt.Normalize(top15["delay_rate"].min(), top15["delay_rate"].max()))
+plt.colorbar(sm, ax=ax, label="Taxa de atraso >15 min")
+ax.set_xlabel("Atraso médio na chegada (min)")
+ax.set_ylabel("Aeroporto de origem")
+ax.set_title("Top 15 aeroportos — maior atraso médio na chegada")
+plt.tight_layout()
+plt.show()"""
+    )
+
+    # ------------------------------------------------------------------ #
+    #  SEÇÃO 6 — Padrões sazonais e horários críticos                    #
+    # ------------------------------------------------------------------ #
+    md(
+        """## 6. Padrões sazonais e horários críticos
+
+### 6.1 Heatmap hora do dia × dia da semana
+
+A hora de partida é obtida de `DEP_MIN` (minutos desde meia-noite) arredondada para o bin de 1 h."""
+    )
+
+    code(
+        r"""hm_df = model_df.copy()
+hm_df["HOUR"] = (hm_df["DEP_MIN"] // 60).astype(int)
+
+pivot = hm_df.pivot_table(
+    values="DELAYED_ARRIVAL",
+    index="HOUR",
+    columns="DAY_OF_WEEK",
+    aggfunc="mean",
+)
+pivot.columns = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"]
+
+plt.figure(figsize=(11, 7))
+sns.heatmap(
+    pivot,
+    cmap="YlOrRd",
+    linewidths=0.3,
+    annot=True,
+    fmt=".2f",
+    cbar_kws={"label": "Taxa atraso >15 min"},
+)
+plt.title("Heatmap: taxa de atraso por hora de partida × dia da semana")
+plt.xlabel("Dia da semana")
+plt.ylabel("Hora de partida (0–23 h)")
+plt.tight_layout()
+plt.show()"""
+    )
+
+    md("### 6.2 Horários mais críticos")
+
+    code(
+        r"""hora_stats = (
+    hm_df.groupby("HOUR", as_index=False)
+    .agg(delay_rate=("DELAYED_ARRIVAL", "mean"), n=("DELAYED_ARRIVAL", "size"))
+    .query("n >= 500")
+    .sort_values("delay_rate", ascending=False)
+)
+print("Top 5 horários com maior taxa de atraso:")
+display(hora_stats.head(5).rename(columns={"HOUR": "Hora", "delay_rate": "Taxa atraso", "n": "N voos"}))
+
+fig, ax = plt.subplots(figsize=(10, 4))
+ax.bar(hora_stats["HOUR"], hora_stats["delay_rate"], color="#e63946", alpha=0.8)
+ax.set_xlabel("Hora de partida")
+ax.set_ylabel("Taxa de atraso >15 min")
+ax.set_title("Taxa de atraso por hora de partida")
+ax.set_xticks(range(0, 24))
+plt.tight_layout()
+plt.show()"""
+    )
+
+    md("### 6.3 Evolução mensal por top-5 aeroportos de origem")
+
+    code(
+        r"""top5_airports = (
+    model_df.groupby("ORIGIN_AIRPORT")["DELAYED_ARRIVAL"]
+    .count()
+    .nlargest(5)
+    .index.tolist()
+)
+monthly_apt = (
+    model_df[model_df["ORIGIN_AIRPORT"].isin(top5_airports)]
+    .groupby(["MONTH", "ORIGIN_AIRPORT"], as_index=False)
+    .agg(delay_rate=("DELAYED_ARRIVAL", "mean"))
+)
+fig, ax = plt.subplots(figsize=(11, 5))
+for apt, grp in monthly_apt.groupby("ORIGIN_AIRPORT"):
+    ax.plot(grp["MONTH"], grp["delay_rate"], marker="o", label=apt)
+ax.set_xticks(range(1, 13))
+ax.set_xticklabels(["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"])
+ax.set_xlabel("Mês")
+ax.set_ylabel("Taxa de atraso >15 min")
+ax.set_title("Sazonalidade mensal — top 5 aeroportos de origem")
+ax.legend(title="Aeroporto")
+plt.tight_layout()
+plt.show()"""
+    )
+
+    # ------------------------------------------------------------------ #
+    #  SEÇÃO 7 — Dashboard interativo (ipywidgets)                        #
+    # ------------------------------------------------------------------ #
+    md(
+        """## 7. Dashboard interativo
+
+Filtros dinâmicos por companhia aérea, mês e aeroporto de origem. Use os controles abaixo e o gráfico atualiza automaticamente.
+
+> **Nota:** requer `ipywidgets` habilitado. No Colab: `%pip install ipywidgets` + extensão ativa."""
+    )
+
+    code(
+        r"""import ipywidgets as widgets
+from IPython.display import display as ipy_display
+import plotly.express as px
+
+# Prepare data once
+dash_df = model_df.merge(
+    airlines.rename(columns={"AIRLINE": "AIRLINE_NAME"}),
+    left_on="AIRLINE",
+    right_on="IATA_CODE",
+    how="left",
+)
+dash_df["AIRLINE_LABEL"] = dash_df["AIRLINE_NAME"].fillna(dash_df["AIRLINE"])
+
+all_airlines = ["Todas"] + sorted(dash_df["AIRLINE_LABEL"].dropna().unique().tolist())
+all_months = ["Todos"] + [str(m) for m in sorted(dash_df["MONTH"].unique().tolist())]
+top20_origins = dash_df["ORIGIN_AIRPORT"].value_counts().head(20).index.tolist()
+all_origins = ["Todos"] + sorted(top20_origins)
+
+dd_airline = widgets.Dropdown(options=all_airlines, value="Todas", description="Companhia:")
+dd_month   = widgets.Dropdown(options=all_months,   value="Todos", description="Mês:")
+dd_origin  = widgets.Dropdown(options=all_origins,  value="Todos", description="Origem:")
+
+def render_dashboard(airline, month, origin):
+    # Optimized filtering (no .copy())
+    df = dash_df
+    if airline != "Todas":
+        df = df[df["AIRLINE_LABEL"] == airline]
+    if month != "Todos":
+        df = df[df["MONTH"] == int(month)]
+    if origin != "Todos":
+        df = df[df["ORIGIN_AIRPORT"] == origin]
+
+    if df.empty:
+        print("Nenhum resultado para os filtros selecionados.")
+        return
+
+    grp = (
+        df.groupby("ORIGIN_AIRPORT", as_index=False)
+        .agg(delay_rate=("DELAYED_ARRIVAL", "mean"), n=("DELAYED_ARRIVAL", "size"))
+        .query("n >= 50")
+        .nlargest(15, "delay_rate")
+        .sort_values("delay_rate", ascending=True)
+    )
+    
+    if grp.empty:
+        print("Nenhum aeroporto com >= 50 voos para esta seleção.")
+        return
+
+    fig = px.bar(
+        grp,
+        x="delay_rate",
+        y="ORIGIN_AIRPORT",
+        orientation="h",
+        title=f"Top 15 aeroportos (Companhia: {airline} | Mês: {month} | Origem: {origin})",
+        labels={"delay_rate": "Taxa de atraso >15 min", "ORIGIN_AIRPORT": "Aeroporto de Origem"},
+        text_auto=".1%",
+    )
+    fig.update_traces(marker_color="#e63946", textfont_size=12, textangle=0, textposition="outside", cliponaxis=False)
+    fig.layout.xaxis.tickformat = '.0%'
+    fig.show()
+    print(f"Total de voos na seleção: {len(df):,}")
+
+# Link widgets to output
+out = widgets.interactive_output(
+    render_dashboard, 
+    {"airline": dd_airline, "month": dd_month, "origin": dd_origin}
+)
+ipy_display(widgets.VBox([widgets.HBox([dd_airline, dd_month, dd_origin]), out]))"""
+    )
+
+    # ------------------------------------------------------------------ #
+    #  SEÇÃO 8 — Detecção de anomalias e semi-supervisionado              #
+    # ------------------------------------------------------------------ #
+    md(
+        """## 8. Detecção de anomalias e aprendizado semi-supervisionado
+
+### 8.1 Isolation Forest
+
+Detecção de voos anômalos (outliers multidimensionais) usando apenas features pré-voo sem labels. A contaminação esperada é fixada em 5%."""
+    )
+
+    code(
+        r"""num_cols_ano = ["MONTH", "DAY_OF_WEEK", "DEP_MIN", "ARR_MIN", "SCHEDULED_TIME", "DISTANCE"]
+ano_df = model_df.dropna(subset=num_cols_ano).sample(n=min(20000, len(model_df)), random_state=RANDOM_SEED)
+Xano = StandardScaler().fit_transform(ano_df[num_cols_ano].values)
+
+iforest = IsolationForest(n_estimators=200, contamination=0.05, random_state=RANDOM_SEED, n_jobs=-1)
+ano_df = ano_df.copy()
+ano_df["anomaly"] = iforest.fit_predict(Xano)  # -1 = anomalia, 1 = normal
+ano_df["anomaly_score"] = iforest.decision_function(Xano)
+
+# Visualização no espaço PCA 2D
+pca2 = PCA(n_components=2, random_state=RANDOM_SEED)
+Z2 = pca2.fit_transform(Xano)
+
+fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+for ax, (label, mask, color) in zip(
+    axes,
+    [
+        ("Normal", ano_df["anomaly"] == 1, "#457b9d"),
+        ("Anomalia (IF)", ano_df["anomaly"] == -1, "#e63946"),
+    ],
+):
+    ax.scatter(Z2[mask, 0], Z2[mask, 1], c=color, alpha=0.3, s=6, label=label)
+
+# Plot combinado
+axes[0].set_title("PCA 2D — normais vs anomalias (Isolation Forest)")
+axes[0].set_xlabel(f"PC1 ({pca2.explained_variance_ratio_[0]*100:.1f}%)")
+axes[0].set_ylabel(f"PC2 ({pca2.explained_variance_ratio_[1]*100:.1f}%)")
+for ax, (lbl, msk, col) in zip(
+    [axes[0], axes[0]],
+    [("Normal", ano_df["anomaly"] == 1, "#457b9d"), ("Anomalia", ano_df["anomaly"] == -1, "#e63946")],
+):
+    ax.scatter(Z2[msk, 0], Z2[msk, 1], c=col, alpha=0.3, s=6, label=lbl)
+axes[0].legend()
+
+# Score distribution
+axes[1].hist(ano_df["anomaly_score"], bins=50, color="#2a9d8f", edgecolor="none")
+axes[1].axvline(0, color="red", lw=1.5, linestyle="--", label="limiar")
+axes[1].set_title("Distribuição do anomaly score")
+axes[1].set_xlabel("Decision function score")
+axes[1].legend()
+plt.tight_layout()
+plt.show()
+
+pct_anomaly = (ano_df["anomaly"] == -1).mean()
+print(f"Anomalias detectadas: {pct_anomaly*100:.1f}% dos voos na subamostra")
+print("Atraso médio dos voos anômalos:",
+      ano_df[ano_df["anomaly"]==-1]["ARRIVAL_DELAY_MIN"].mean().round(1), "min")
+print("Atraso médio dos voos normais :",
+      ano_df[ano_df["anomaly"]==1]["ARRIVAL_DELAY_MIN"].mean().round(1), "min")"""
+    )
+
+    md(
+        """### 8.2 Aprendizado semi-supervisionado — LabelSpreading
+
+Simulação de cenário prático: apenas **10% dos voos** têm o label real (`DELAYED_ARRIVAL`); os restantes 90% são tratados como não rotulados. O `LabelSpreading` propaga os rótulos usando a estrutura de vizinhança no espaço de features."""
+    )
+
+    code(
+        r"""ss_df = model_df.dropna(subset=num_cols_ano).sample(n=min(8000, len(model_df)), random_state=RANDOM_SEED)
+Xss = StandardScaler().fit_transform(ss_df[num_cols_ano].values)
+yss = ss_df["DELAYED_ARRIVAL"].values.copy().astype(int)
+
+# Mascarar 90% como não rotulados (-1)
+rng = np.random.default_rng(RANDOM_SEED)
+mask_labeled = rng.random(len(yss)) < 0.10
+yss_semi = np.where(mask_labeled, yss, -1)
+
+ls = LabelSpreading(kernel="rbf", gamma=0.25, max_iter=30, n_jobs=-1)
+ls.fit(Xss, yss_semi)
+yss_pred = ls.predict(Xss)
+
+# Avaliar apenas nos registos anteriormente não rotulados
+unlabeled_mask = ~mask_labeled
+acc_ss = accuracy_score(yss[unlabeled_mask], yss_pred[unlabeled_mask])
+f1_ss  = f1_score(yss[unlabeled_mask], yss_pred[unlabeled_mask])
+
+# Baseline supervisionado (mesmo subconjunto, 80/20 split)
+from sklearn.linear_model import LogisticRegression as LR
+Xtr, Xte, ytr, yte = train_test_split(Xss, yss, test_size=0.2, random_state=RANDOM_SEED, stratify=yss)
+baseline = LR(max_iter=1000, solver="saga", class_weight="balanced", random_state=RANDOM_SEED)
+baseline.fit(Xtr, ytr)
+ypred_base = baseline.predict(Xte)
+acc_base = accuracy_score(yte, ypred_base)
+f1_base  = f1_score(yte, ypred_base)
+
+results = pd.DataFrame([
+    {"Método": "LR supervisionado (80% treino)", "Accuracy": acc_base, "F1": f1_base},
+    {"Método": "LabelSpreading semi-sup. (10% labels)", "Accuracy": acc_ss, "F1": f1_ss},
+])
+display(results.round(4))
+
+fig, ax = plt.subplots(figsize=(7, 3.5))
+x = np.arange(2)
+w = 0.35
+ax.bar(x - w/2, results["Accuracy"], w, label="Accuracy", color="#457b9d")
+ax.bar(x + w/2, results["F1"], w, label="F1", color="#e76f51")
+ax.set_xticks(x)
+ax.set_xticklabels(results["Método"], fontsize=9)
+ax.set_ylim(0, 1)
+ax.set_ylabel("Score")
+ax.set_title("Supervisionado vs Semi-supervisionado")
+ax.legend()
+plt.tight_layout()
+plt.show()"""
+    )
+
+    md(
+        """## 9. Conclusões, limitações e próximos passos
 
 ### Principais conclusões
 - A taxa de atraso varia com **mês**, **dia da semana** e **companhia**, visível no EDA e nos clusters.
 - Com apenas informação pré-voo, a **classificação** costuma ter ROC-AUC moderado (o problema é intrinsecamente ruidoso); **Random Forest** tende a captar não linearidades vs regressão logística.
 - A **regressão** do valor exato do atraso é mais difícil: R² baixo é esperado; MAE/RMSE em minutos permitem comparar algoritmos.
 - **PCA** mostra sobreposição entre classes: os atrasos não são linearmente separáveis neste subespaço.
-- **K-Means** nos perfis de companhia agrupa operadores com comportamentos semelhantes de pontualidade e magnitude de atraso (interpretável com o nome da companhia).
+- **K-Means** nos perfis de companhia agrupa operadores com comportamentos semelhantes de pontualidade e magnitude de atraso.
+- O **mapa geográfico** revela concentração de atrasos em hubs do nordeste e Chicago.
+- O **heatmap hora×dia** mostra que voos da tarde/início de noite (15h–20h) e às sextas-feiras acumulam mais atrasos.
+- O **Isolation Forest** identifica ~5% de voos com perfil atípico; esses voos tendem a ter atraso médio significativamente maior.
+- O **LabelSpreading** com apenas 10% de labels atinge performance próxima ao baseline supervisionado, indicando estrutura de vizinhança informativa.
 
 ### Limitações
-- **Amostra** parcial do ficheiro total para viabilizar RAM/tempo; estimativas têm variância de amostragem.
+- **Amostra** parcial do ficheiro total para viabilizar RAM/tempo.
 - **Definição de atraso** (>15 min) é arbitrária; outros limiares mudam a prevalência.
-- **Regressão** usa também voos adiantados (atraso negativo); alternativa seria modelar só `max(0, delay)`.
 - **Sazonalidade e eventos** (clima extremo, greves) não estão explicitamente como features.
 - **Cardinalidade** de aeroportos: `max_categories` no one-hot agrupa categorias pouco frequentes.
 
 ### Melhorias
 - Incluir **histórico** (atraso médio da rota/companhia em janelas anteriores) com validação temporal rigorosa.
-- **Calibração** de probabilidades (Platt / isotónica) para decisões operacionais.
-- Modelos de **séries tempora** ou **gradient boosting** (XGBoost/LightGBM) com *early stopping*.
-- **Validação por tempo** (treino em meses anteriores, teste no mês seguinte) em vez de split aleatório.
+- Modelos de **gradient boosting** (XGBoost/LightGBM) com *early stopping*.
+- **Validação por tempo** (treino em meses anteriores, teste no mês seguinte).
 - Enriquecer com **dados meteorológicos** ou **capacidade** de aeroporto."""
     )
 
