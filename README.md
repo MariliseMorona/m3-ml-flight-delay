@@ -2,6 +2,11 @@
 
 Projeto em Python que cobre um **pipeline completo** de ciência de dados sobre voos domésticos nos Estados Unidos (dataset tipo *Flight Delays and Cancellations*, ex. ano 2015): exploração (EDA), tratamento de ausentes, **modelação supervisionada** (classificação e regressão), **modelação não supervisionada** (PCA e clusterização) e **interpretação crítica** (conclusões, limitações, próximos passos).
 
+## 📺 Apresentação do Projeto (Vídeo)
+
+Assista ao vídeo explicativo detalhando as análises, os painéis visuais e os modelos de inteligência artificial desenvolvidos neste Tech Challenge:
+▶️ **[Assistir apresentação no YouTube](https://youtu.be/86MqUxeL9Ss)**
+
 ---
 
 ## Índice
